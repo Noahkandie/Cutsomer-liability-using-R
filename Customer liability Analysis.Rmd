@@ -1,0 +1,191 @@
+---
+output:
+  word_document: default
+  pdf_document: default
+  html_document: default
+---
+```{r}
+if (!require(mlba)) {
+  library(devtools)
+  install_github("gedeck/mlba/mlba", force=TRUE)
+}
+
+options(dplyr.summarise.inform = FALSE)
+```
+```{r}
+# Install libraries
+library(caTools)
+library(class)
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(caret)
+library(pROC)
+library(mlbench)
+```
+```{r}
+
+## Data Summaries
+df <- mlba::UniversalBank
+
+# Preview the data 
+head(df)
+#View(df)
+str(df)
+```
+```{r}
+# Check Summary
+summary(df)
+```
+```{r}
+#Check nulls
+colSums(is.na(df))
+```
+```{r}
+# CHeck for the unique values in each column 
+sapply(df, function(x) n_distinct(x))
+```
+```{r}
+# Drop ID and ZIP code
+df = subset(df, select = -c(ID ,ZIP.Code) )
+head(df)
+
+colSums(df)
+```
+```{r}
+# Change the categorical columns ( ideally with 2 values)
+names <- c('CreditCard'  ,'CD.Account','Education','Family',
+           'Online','Personal.Loan')
+df[,names] <- lapply(df[,names] , factor)
+str(df)
+```
+```{r}
+# Lets check the value counts of the target variable
+table(df['Personal.Loan'])
+```
+```{r}
+# Define the new customer's characteristics
+new_customer <- data.frame(
+  Age = 40,
+  Experience = 10,
+  Income = 84,
+  Family = 2,
+  CCAvg = 2,
+  Education = as.factor(2),
+  Mortgage = 0,
+  Securities.Account = as.factor(0),
+  CD.Account = as.factor(0),
+  Online = as.factor(1),
+  CreditCard = as.factor(1)
+)
+```
+
+```{r}
+
+#### A
+# Set a seed for reproducibility
+set.seed(1)
+
+# Define the predictors and response variable
+predictors <- df %>%
+  select( -Personal.Loan)
+response <- df$Personal.Loan
+
+
+# Split the data into training (60%) and holdout (40%) sets
+trainIndex <- createDataPartition(response, p = 0.6, list = FALSE)
+train_data <- predictors[trainIndex, ]
+holdout_data <- predictors[-trainIndex, ]
+```
+```{r}
+
+numerical_vars <- train_data %>%
+  select(Age, Experience, Income, CCAvg, Mortgage)
+
+# Use the preProcess function to scale or normalize the numerical variables
+preprocess_params <- preProcess(numerical_vars, method = c("center", "scale"))  
+# Apply the same preprocessing to both training and holdout data
+train_data[, names(numerical_vars)] <- predict(preprocess_params, train_data)
+holdout_data[, names(numerical_vars)] <- predict(preprocess_params, holdout_data)
+```
+```{r}
+# Create a k-NN model with k=1 the entire train dataset
+k <- 1
+knn_model <- knn(train_data, train_data, response[trainIndex], k = k)
+
+```
+```{r}
+# classification for the new customer using the k-NN model
+customer_choice <- knn(train_data, new_customer, cl = response[trainIndex], k = k)
+
+# Display the classification result (1 for accepting a loan, 0 for not accepting)
+customer_choice
+```
+```{r}
+
+#### B
+# Set a seed for reproducibility
+set.seed(123)
+
+
+# Create a 5-fold cross-validation control
+cv_control <- trainControl(method = "cv", number = 5)
+
+# Perform grid search for different values of k
+grid <- expand.grid(k = 1:25)  
+```
+```{r}
+# Use train to perform grid search and cross-validation 
+knn_model <- train(
+  x = train_data, y = response[trainIndex],
+  method = "knn",
+  tuneGrid = grid,
+  trControl = cv_control
+)
+```
+```{r}
+# Get the best k from the model
+best_k <- knn_model$bestTune$k
+best_k
+```
+```{r}
+#Plot the model to show which k is optimal
+plot(knn_model,main = "Optimal k for the k-NN")
+```
+```{r}
+# Create the k-NN model with the best k
+knn_best_model <- knn(train_data, train_data, response[trainIndex], k = best_k)
+print(knn_best_model)
+```
+```{r}
+# Predict on the training data
+train_predictions <- knn_best_model
+
+# Predict on the holdout data
+holdout_predictions <- knn(train_data, holdout_data, response[trainIndex], k = best_k)
+```
+```{r}
+
+### C
+# Create confusion matrices
+cm_train <- confusionMatrix(train_predictions, response[trainIndex])
+cm_holdout <- confusionMatrix(holdout_predictions, response[-trainIndex])
+
+# Display the confusion matrices
+cm_train
+```
+```{r}
+# Holdout confusion matrix
+cm_holdout
+
+```
+```{r}
+# Classify the new customer using the best k-NN model
+best_class_choice <- knn(train_data, new_customer, cl = response[trainIndex], k = best_k)
+
+```
+```{r}
+# Display the classification result 
+#(1 for accepting a loan, 0 for not accepting)
+best_class_choice
+```
